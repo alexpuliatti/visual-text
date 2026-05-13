@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# env files (API keys)
+.env
+.env.local
+.env.*.local
+
+# build output
+dist/
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# debug logs
+npm-debug.log*
+
+# patches
+patch.cjs
