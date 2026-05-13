@@ -6,8 +6,6 @@ Function words (articles, prepositions, conjunctions) are left plain — only me
 
 ## Demo
 
-![Demo](assets/demo.webp)
-
 ![Screenshot](assets/screenshot.png)
 
 ## Try It
