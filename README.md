@@ -2,8 +2,6 @@
 
 A writing interface where images appear behind words as you type. Each concept word (nouns, verbs, adjectives) triggers a real-time image search via the [Pexels API](https://www.pexels.com/api/), creating a visual layer beneath the text.
 
-Function words (articles, prepositions, conjunctions) are left plain — only meaningful words get illustrated.
-
 ## Demo
 
 ![Screenshot](assets/screenshot.png)
