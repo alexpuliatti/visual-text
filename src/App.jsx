@@ -1,24 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PEXELS_API_KEY = import.meta.env.VITE_PEXELS_API_KEY || '';
 
 // Stop words: articles, prepositions, conjunctions, pronouns, adverbs, auxiliary verbs
-// Only "concept words" (nouns, main verbs, adjectives) should get images
 const STOP_WORDS = new Set([
-  // Articles
   'a', 'an', 'the',
-  // Prepositions
   'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about',
   'into', 'over', 'after', 'under', 'between', 'out', 'against', 'during',
   'without', 'before', 'around', 'among', 'through', 'above', 'below',
   'along', 'across', 'behind', 'beyond', 'near', 'upon', 'within',
-  // Conjunctions
   'and', 'but', 'or', 'nor', 'for', 'yet', 'so', 'if', 'then', 'else',
   'when', 'while', 'although', 'because', 'since', 'unless', 'until',
   'whether', 'though', 'than', 'that', 'once',
-  // Pronouns
   'i', 'me', 'my', 'mine', 'myself',
   'you', 'your', 'yours', 'yourself',
   'he', 'him', 'his', 'himself',
@@ -27,18 +21,15 @@ const STOP_WORDS = new Set([
   'we', 'us', 'our', 'ours', 'ourselves',
   'they', 'them', 'their', 'theirs', 'themselves',
   'who', 'whom', 'whose', 'which', 'what', 'this', 'that', 'these', 'those',
-  // Auxiliary / modal verbs
   'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
   'have', 'has', 'had', 'having',
   'do', 'does', 'did',
   'will', 'would', 'shall', 'should',
   'can', 'could', 'may', 'might', 'must',
-  // Common adverbs
   'not', 'no', 'very', 'just', 'also', 'too', 'only', 'even',
   'now', 'here', 'there', 'where', 'how', 'why',
   'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
   'some', 'any', 'such', 'as',
-  // Other function words
   'yes', 'well', 'oh', 'ok', 'like',
 ]);
 
@@ -48,24 +39,24 @@ function isConceptWord(word) {
   return !STOP_WORDS.has(clean);
 }
 
-const useDebounce = (value, delay) => {
+// Simple debounce hook
+function useDebounce(value, delay) {
   const [debouncedValue, setDebouncedValue] = useState(value);
-
   useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
   }, [value, delay]);
-
   return debouncedValue;
-};
+}
 
-const WordNode = ({ word }) => {
-  const [imageUrl, setImageUrl] = useState(null);
+// Image cache to avoid refetching the same word
+const imageCache = new Map();
+
+function WordNode({ word }) {
+  const [imageUrl, setImageUrl] = useState(() => {
+    const clean = word.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    return imageCache.get(clean) || null;
+  });
   const debouncedWord = useDebounce(word, 400);
   const isConcept = isConceptWord(word);
 
@@ -75,42 +66,46 @@ const WordNode = ({ word }) => {
       return;
     }
 
-    const cleanWord = debouncedWord.replace(/[^a-zA-Z0-9]/g, '');
+    const cleanWord = debouncedWord.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     if (!cleanWord) {
       setImageUrl(null);
       return;
     }
 
+    // Check cache first
+    if (imageCache.has(cleanWord)) {
+      setImageUrl(imageCache.get(cleanWord));
+      return;
+    }
+
     let isMounted = true;
 
-    const fetchImage = async () => {
+    async function fetchImage() {
       if (!PEXELS_API_KEY) return;
       try {
-        const response = await axios.get(
-          `https://api.pexels.com/v1/search?query=${encodeURIComponent(cleanWord)}&per_page=1`,
+        const res = await fetch(
+          'https://api.pexels.com/v1/search?query=' + encodeURIComponent(cleanWord) + '&per_page=1',
           { headers: { Authorization: PEXELS_API_KEY } }
         );
-
-        if (isMounted && response.data.photos && response.data.photos.length > 0) {
-          setImageUrl(response.data.photos[0].src.medium);
+        const data = await res.json();
+        if (isMounted && data.photos && data.photos.length > 0) {
+          const url = data.photos[0].src.medium;
+          imageCache.set(cleanWord, url);
+          setImageUrl(url);
         } else if (isMounted) {
           setImageUrl(null);
         }
-      } catch (error) {
-        console.error('Error fetching image:', error);
+      } catch (err) {
+        console.error('Pexels fetch error:', err);
       }
-    };
+    }
 
     fetchImage();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [debouncedWord, isConcept]);
 
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}>
-      {/* Text layer */}
       <span
         style={{
           position: 'relative',
@@ -121,8 +116,6 @@ const WordNode = ({ word }) => {
       >
         {word}
       </span>
-
-      {/* Image layer behind the text */}
       <AnimatePresence>
         {imageUrl && (
           <motion.img
@@ -148,30 +141,37 @@ const WordNode = ({ word }) => {
       </AnimatePresence>
     </span>
   );
-};
+}
 
-const WritingInterface = () => {
+// Tokenize text into words and whitespace segments
+const SPLIT_RE = /(\s+)/;
+
+function tokenize(text) {
+  return text.split(SPLIT_RE);
+}
+
+function WritingInterface() {
   const [text, setText] = useState('');
-  const contentEditableRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  // Auto-focus on mount so user can start typing immediately
+  // Auto-focus on mount
   useEffect(() => {
-    if (contentEditableRef.current) {
-      contentEditableRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.focus();
     }
   }, []);
 
-  const handleInput = (e) => {
-    setText(e.target.innerText || '');
-  };
+  const handleChange = useCallback((e) => {
+    setText(e.target.value);
+  }, []);
 
-  const handleContainerClick = () => {
-    if (contentEditableRef.current) {
-      contentEditableRef.current.focus();
+  const handleContainerClick = useCallback(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
     }
-  };
+  }, []);
 
-  const tokens = text.split(/(\s+)/);
+  const tokens = tokenize(text);
 
   return (
     <div
@@ -184,11 +184,13 @@ const WritingInterface = () => {
         cursor: 'text',
       }}
     >
-      {/* Invisible contentEditable for typing */}
-      <div
-        ref={contentEditableRef}
-        contentEditable
-        onInput={handleInput}
+      {/* Hidden textarea for reliable text input */}
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={handleChange}
+        spellCheck={false}
+        autoComplete="off"
         style={{
           position: 'absolute',
           top: 0,
@@ -202,11 +204,17 @@ const WritingInterface = () => {
           textAlign: 'left',
           zIndex: 10,
           outline: 'none',
+          border: 'none',
+          resize: 'none',
+          background: 'transparent',
           color: 'transparent',
           caretColor: 'black',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           letterSpacing: '-0.02em',
+          padding: 0,
+          margin: 0,
+          overflow: 'hidden',
         }}
       />
 
@@ -232,12 +240,12 @@ const WritingInterface = () => {
         }}
       >
         {tokens.map((token, index) => {
-          if (/^\s+$/.test(token)) {
+          if (SPLIT_RE.test(token)) {
             if (token.includes('\n')) {
               return (
                 <span key={index}>
-                  {token.split('\n').map((_, i, arr) =>
-                    i === arr.length - 1 ? null : <br key={i} />
+                  {token.split('\n').map((part, i, arr) =>
+                    i === arr.length - 1 ? (part || null) : <br key={i} />
                   )}
                 </span>
               );
@@ -249,7 +257,7 @@ const WritingInterface = () => {
       </div>
     </div>
   );
-};
+}
 
 export default function App() {
   return (
